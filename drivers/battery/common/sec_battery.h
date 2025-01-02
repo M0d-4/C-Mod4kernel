@@ -268,6 +268,15 @@ struct sec_siop_table {
 
 #define SIOP_SCENARIO_NUM_MAX		10
 
+struct sec_wireless_rx_power_info {
+	unsigned int vout;
+	unsigned int input_current_limit;
+	unsigned int fast_charging_current;
+	unsigned int ttf_charge_current;
+	unsigned int wireless_power_class;
+	unsigned int rx_power;
+};
+
 struct sec_bat_thm_info {
 	int source;
 	sec_bat_adc_table_data_t *adc_table;
@@ -291,6 +300,9 @@ enum sec_battery_thm_info {
 	THM_INFO_BLK,
 	THM_INFO_DCHG,
 };
+
+#define sec_wireless_rx_power_info_t \
+	struct sec_wireless_rx_power_info
 
 /* LRP structure */
 #define LRP_PROPS 12
@@ -367,6 +379,7 @@ typedef struct sec_battery_platform_data {
 	sec_bat_adc_region_t *cable_adc_value;
 	/* charging current for type (0: not use) */
 	sec_charging_current_t charging_current[SEC_BATTERY_CABLE_MAX];
+	sec_wireless_rx_power_info_t *wireless_power_info;
 	unsigned int *polling_time;
 	char *chip_vendor;
 	/* NO NEED TO BE CHANGED */
@@ -390,6 +403,7 @@ typedef struct sec_battery_platform_data {
 
 	unsigned int swelling_high_rechg_voltage;
 	unsigned int swelling_low_rechg_voltage;
+	unsigned int swelling_low_rechg_soc;
 	unsigned int swelling_low_cool3_rechg_voltage;
 	bool chgen_over_swell_rechg_vol;
 
@@ -1173,6 +1187,8 @@ struct sec_battery_info {
 	unsigned int wc20_vout;
 	unsigned int wc20_power_class;
 	unsigned int wc20_rx_power;
+	unsigned int wc20_info_len;
+	unsigned int wc20_info_idx;
 	struct delayed_work wc20_current_work;
 	struct delayed_work wc_ept_timeout_work;
 	struct wakeup_source *wc20_current_ws;

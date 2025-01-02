@@ -616,6 +616,8 @@ int adreno_drawctxt_switch(struct adreno_device *adreno_dev,
 	if (drawctxt != NULL && kgsl_context_detached(&drawctxt->base))
 		return -ENOENT;
 
+	trace_adreno_drawctxt_switch(rb, drawctxt);
+
 	/* Get a refcount to the new instance */
 	if (drawctxt) {
 		if (!_kgsl_context_get(&drawctxt->base))

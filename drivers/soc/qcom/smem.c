@@ -401,6 +401,8 @@ static int qcom_smem_alloc_private(struct qcom_smem *smem,
 
 		hdr = next_hdr;
 	}
+	if (WARN_ON((void *)hdr > p_end))
+		return -EINVAL;
 
 	if (WARN_ON((void *)hdr > (void *)end))
 		return -EINVAL;
@@ -658,6 +660,8 @@ static void *qcom_smem_get_private(struct qcom_smem *smem,
 
 		e = next_e;
 	}
+	if (WARN_ON((void *)e < (void *)phdr))
+		return ERR_PTR(-EINVAL);
 
 	if (WARN_ON((void *)e < (void *)phdr))
 		return ERR_PTR(-EINVAL);

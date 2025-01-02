@@ -245,6 +245,49 @@ unsigned int get_wc20_vout(unsigned int vout)
 	return ret;
 }
 
+#if 0
+unsigned int get_wc20_rx_power_idx(unsigned int rx_power)
+{
+	unsigned int ret = 0;
+
+	switch (rx_power) {
+	case 7500:
+		ret = SEC_WIRELESS_RX_POWER_7_5W;
+		break;
+	case 12000:
+		ret = SEC_WIRELESS_RX_POWER_12W;
+		break;
+	case 15000:
+		ret = SEC_WIRELESS_RX_POWER_15W;
+		break;
+	default:
+		pr_info("%s rx_power(%d) is not supported\n", __func__, rx_power);
+		return -1;
+	}
+
+	pr_info("%s rx_power(%d) - idx(%d)\n", __func__, rx_power, ret);
+	return ret;
+}
+
+unsigned int get_wc20_info_idx(sec_wireless_rx_power_info_t *wc20_info,
+	unsigned int wc20_info_len, unsigned int vout, unsigned int rx_power)
+{
+	unsigned int idx = 0;
+
+	for (idx = 0; idx < wc20_info_len; idx++) {
+		if ((get_wc20_vout_idx(wc20_info[idx].vout) == vout) &&
+			(get_wc20_rx_power_idx(wc20_info[idx].rx_power) == rx_power)) {
+			pr_info("%s: Found! idx(%d), vout(%d), rx_power(%d)\n",
+				__func__, idx, vout, rx_power);
+			return idx;
+		}
+	}
+
+	pr_info("%s: Not found! vout(%d), rx_power(%d)\n", __func__, vout, rx_power);
+	return wc20_info_len - 1;
+}
+#endif
+
 void sec_bat_set_wc20_current(struct sec_battery_info *battery)
 {
 	int icl = 0, fcc = 0;
@@ -440,6 +483,10 @@ __visible_for_testing void sec_bat_switch_to_wr(struct sec_battery_info *battery
 		psy_do_property(battery->pdata->wireless_charger_name, set,
 				POWER_SUPPLY_EXT_PROP_WIRELESS_SWITCH, val);
 	}
+
+	sec_bat_change_default_current(battery, SEC_BATTERY_CABLE_WIRELESS_MPP,
+			battery->pdata->default_mpp_input_current,
+			battery->pdata->default_mpp_charging_current);
 }
 
 __visible_for_testing void sec_bat_switch_to_wrl(struct sec_battery_info *battery, int wr_sts, int prev_ct)
@@ -523,6 +570,9 @@ void sec_bat_get_wireless_current(struct sec_battery_info *battery)
 {
 	int incurr = INT_MAX;
 	union power_supply_propval value = {0, };
+
+	if (battery->cable_type == SEC_BATTERY_CABLE_WIRELESS_MPP)
+		return;
 
 	/* WPC_SLEEP_MODE */
 	if (is_hv_wireless_type(battery->cable_type) && battery->sleep_mode) {

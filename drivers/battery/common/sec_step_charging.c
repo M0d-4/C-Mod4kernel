@@ -337,6 +337,8 @@ bool sec_bat_check_wpc_step_charging(struct sec_battery_info *battery)
 	else
 		lcd_status = 0;
 
+	pr_info("%s\n", __func__);
+
 	if (battery->wpc_step_chg_type & STEP_CHARGING_CONDITION_CHARGE_POWER) {
 		if (battery->max_charge_power < battery->wpc_step_chg_charge_power) {
 			/* In case of max_charge_power falling by AICL during step-charging ongoing */

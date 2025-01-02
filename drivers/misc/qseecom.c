@@ -375,6 +375,7 @@ struct qseecom_client_handle {
 struct qseecom_listener_handle {
 	u32               id;
 	bool              register_pending;
+	bool              unregister_pending;
 	bool              release_called;
 };
 

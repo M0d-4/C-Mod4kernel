@@ -2071,6 +2071,7 @@ __visible_for_testing bool sec_bat_check_recharge(struct sec_battery_info *batte
 				recharging_voltage = battery->pdata->swelling_low_cool3_rechg_voltage;
 			else
 				recharging_voltage = battery->pdata->swelling_low_rechg_voltage;
+			recharging_soc = battery->pdata->swelling_low_rechg_soc;
 		}
 		dev_info(battery->dev, "%s: recharging voltage(%d) soc(%d) %s\n",
 			__func__, recharging_voltage, recharging_soc,
@@ -2172,6 +2173,8 @@ static bool sec_bat_voltage_check(struct sec_battery_info *battery)
 #else
 		int soc_ref = battery->pdata->full_condition_soc;
 #endif
+		pr_info("%s: chg mode (%d), voltage_ref(%d), voltage_now(%d)\n",
+			__func__, battery->charging_mode, voltage_ref, voltage_now);
 
 		if (battery->current_event & SEC_BAT_CURRENT_EVENT_LOW_TEMP_MODE) {
 			if (battery->current_event & SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_COOL3)
@@ -2227,6 +2230,11 @@ static bool sec_bat_voltage_check(struct sec_battery_info *battery)
 		battery->cisd.data[CISD_DATA_RECHARGING_COUNT]++;
 		battery->cisd.data[CISD_DATA_RECHARGING_COUNT_PER_DAY]++;
 		if (is_wireless_type(battery->cable_type)) {
+			if (battery->cable_type == SEC_BATTERY_CABLE_WIRELESS_MPP) {
+				value.intval = 0;
+				psy_do_property("wireless", set,
+						POWER_SUPPLY_EXT_PROP_MPP_CLOAK, value);
+			}
 #if defined(CONFIG_WIRELESS_RX_PHM_CTRL)
 			value.intval = EXIT_PHM;
 			psy_do_property(battery->pdata->wireless_charger_name, set,
@@ -4848,6 +4856,7 @@ static void sec_bat_wc20_current_work(struct work_struct *work)
 				struct sec_battery_info, wc20_current_work.work);
 
 	sec_bat_set_wc20_current(battery);
+	sec_bat_predict_wc20_time_to_full_current(battery, battery->wc20_info_idx);
 	__pm_relax(battery->wc20_current_ws);
 }
 
@@ -5100,6 +5109,7 @@ static void cw_nocharge_type(struct sec_battery_info *battery)
 	battery->d2d_check = false;
 #if IS_ENABLED(CONFIG_WIRELESS_CHARGING)
 	battery->wc20_power_class = 0;
+	sec_bat_predict_wc20_time_to_full_current(battery, -1);
 	battery->wc20_rx_power = 0;
 	battery->wc20_vout = 0;
 #endif
@@ -5139,6 +5149,9 @@ static void cw_nocharge_type(struct sec_battery_info *battery)
 	sec_bat_change_default_current(battery, SEC_BATTERY_CABLE_WIRELESS_EPP,
 			battery->pdata->default_wc20_input_current,
 			battery->pdata->default_wc20_charging_current);
+	sec_bat_change_default_current(battery, SEC_BATTERY_CABLE_WIRELESS_MPP,
+			battery->pdata->default_mpp_input_current,
+			battery->pdata->default_mpp_charging_current);
 	/* usb default current is 100mA before configured*/
 	sec_bat_set_current_event(battery, SEC_BAT_CURRENT_EVENT_USB_100MA,
 			(SEC_BAT_CURRENT_EVENT_CHARGE_DISABLE |
@@ -5437,6 +5450,9 @@ __visible_for_testing void sec_bat_cable_work(struct work_struct *work)
 #endif
 #endif
 
+	/* check wire type PD charger case */
+	cw_check_pd_wire_type(battery);
+
 #if IS_ENABLED(CONFIG_WIRELESS_CHARGING)
 	current_cable_type = sec_bat_choose_cable_type(battery);
 #elif defined(CONFIG_USE_POGO)
@@ -5588,6 +5604,7 @@ end_of_cable_work:
 					BATT_MISC_EVENT_TIMEOUT_OPEN_TYPE);
 #endif
 
+	sb_set_vbus_wake(battery->vbus_ws, battery->health, battery->cable_type);
 	__pm_relax(battery->cable_ws);
 	dev_info(battery->dev, "%s: End\n", __func__);
 }
@@ -6031,6 +6048,42 @@ static int sec_bat_set_property(struct power_supply *psy,
 			}
 			battery->cisd.data[CISD_DATA_AICL_COUNT]++;
 			battery->cisd.data[CISD_DATA_AICL_COUNT_PER_DAY]++;
+			break;
+		case POWER_SUPPLY_EXT_PROP_SYSOVLO:
+			if (battery->status != POWER_SUPPLY_STATUS_DISCHARGING) {
+				pr_info("%s: Vsys is ovlo !!\n", __func__);
+				battery->is_sysovlo = true;
+				battery->is_recharging = false;
+				battery->charging_mode = SEC_BATTERY_CHARGING_NONE;
+				sec_bat_set_health(battery, POWER_SUPPLY_EXT_HEALTH_VSYS_OVP);
+				sec_bat_set_current_event(battery, SEC_BAT_CURRENT_EVENT_VSYS_OVP, SEC_BAT_CURRENT_EVENT_VSYS_OVP);
+				sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_NOT_CHARGING);
+				battery->cisd.data[CISD_DATA_VSYS_OVP]++;
+				battery->cisd.data[CISD_DATA_VSYS_OVP_PER_DAY]++;
+#if IS_ENABLED(CONFIG_SEC_ABC)
+				sec_abc_send_event("MODULE=battery@WARN=vsys_ovp");
+#endif
+				sec_vote(battery->chgen_vote, VOTER_SYSOVLO, true, SEC_BAT_CHG_MODE_CHARGING_OFF);
+				__pm_stay_awake(battery->monitor_ws);
+				queue_delayed_work(battery->monitor_wqueue,
+							&battery->monitor_work, 0);
+			}
+			break;
+		case POWER_SUPPLY_EXT_PROP_VBAT_OVP:
+			if (battery->status != POWER_SUPPLY_STATUS_DISCHARGING) {
+				pr_info("%s: Vbat is ovlo !!\n", __func__);
+				battery->is_vbatovlo = true;
+				battery->is_recharging = false;
+				battery->charging_mode = SEC_BATTERY_CHARGING_NONE;
+				sec_bat_set_health(battery, POWER_SUPPLY_EXT_HEALTH_VBAT_OVP);
+				sec_bat_set_current_event(battery, SEC_BAT_CURRENT_EVENT_VBAT_OVP, SEC_BAT_CURRENT_EVENT_VBAT_OVP);
+				sec_bat_set_charging_status(battery, POWER_SUPPLY_STATUS_NOT_CHARGING);
+
+				sec_vote(battery->chgen_vote, VOTER_VBAT_OVP, true, SEC_BAT_CHG_MODE_CHARGING_OFF);
+				__pm_stay_awake(battery->monitor_ws);
+				queue_delayed_work(battery->monitor_wqueue,
+							&battery->monitor_work, 0);
+			}
 			break;
 		case POWER_SUPPLY_EXT_PROP_USB_CONFIGURE:
 #if IS_ENABLED(CONFIG_USB_FACTORY_MODE) && defined(CONFIG_SEC_FACTORY)
@@ -7019,6 +7072,11 @@ static int sec_wireless_set_property(struct power_supply *psy,
 					BATT_MISC_EVENT_WIRELESS_AUTH_PASS);
 				if (battery->wc_status == SEC_BATTERY_CABLE_HV_WIRELESS_20)
 					battery->cisd.cable_data[CISD_CABLE_HV_WC_20]++;
+			} else if (battery->wc_status == SEC_BATTERY_CABLE_WIRELESS_MPP) {
+				change_sec_voter_pri(battery->input_vote, VOTER_WPC_CUR, VOTE_PRI_1);
+				sec_vote(battery->input_vote, VOTER_WPC_CUR, true,
+					battery->pdata->charging_current[battery->wc_status].input_current_limit);
+				sec_vote(battery->input_vote, VOTER_CABLE, false, 0);
 			}
 		}
 
@@ -9372,6 +9430,7 @@ static int sec_battery_probe(struct platform_device *pdev)
 	battery->wc20_power_class = 0;
 	battery->wc20_vout = 0;
 	battery->wc20_rx_power = 0;
+	battery->wc20_info_idx = 0;
 #endif
 	battery->thermal_zone = BAT_THERMAL_NORMAL;
 	sec_bat_set_threshold(battery, battery->cable_type);

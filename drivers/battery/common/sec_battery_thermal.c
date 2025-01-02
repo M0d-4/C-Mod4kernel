@@ -294,6 +294,79 @@ int sec_bat_get_temp_by_temp_control_source(struct sec_battery_info *battery, in
 EXPORT_SYMBOL_KUNIT(sec_bat_get_temp_by_temp_control_source);
 
 #if IS_ENABLED(CONFIG_WIRELESS_CHARGING)
+__visible_for_testing int sec_bat_check_wpc_vout(struct sec_battery_info *battery, int ct, unsigned int chg_limit,
+		int pre_vout, unsigned int evt)
+{
+	union power_supply_propval value = {0, };
+	int vout = 0;
+	bool check_flicker_wa = false;
+
+	if (!is_hv_wireless_type(ct) || (ct == SEC_BATTERY_CABLE_WIRELESS_MPP))
+		return 0;
+
+	if ((ct == SEC_BATTERY_CABLE_HV_WIRELESS_20) || (ct == SEC_BATTERY_CABLE_WIRELESS_EPP))
+		vout = battery->wpc_max_vout_level;
+	else
+		vout = WIRELESS_VOUT_10V;
+
+	mutex_lock(&battery->voutlock);
+	if (battery->pdata->wpc_vout_ctrl_lcd_on) {
+		psy_do_property(battery->pdata->wireless_charger_name, get,
+			POWER_SUPPLY_EXT_PROP_WIRELESS_TX_ID, value);
+		if ((value.intval != WC_PAD_ID_UNKNOWN) &&
+			(value.intval != WC_PAD_ID_SNGL_DREAM) &&
+			(value.intval != WC_PAD_ID_STAND_DREAM)) {
+			if (battery->wpc_vout_ctrl_mode && battery->lcd_status) {
+				pr_info("%s: trigger flicker wa\n", __func__);
+				check_flicker_wa = true;
+			} else {
+				value.intval = 0;
+				psy_do_property(battery->pdata->wireless_charger_name, get,
+					POWER_SUPPLY_EXT_PROP_PAD_VOLT_CTRL, value);
+				if (!value.intval) {
+					pr_info("%s: recover flicker wa\n", __func__);
+					value.intval = battery->lcd_status;
+					psy_do_property(battery->pdata->wireless_charger_name, set,
+						POWER_SUPPLY_EXT_PROP_PAD_VOLT_CTRL, value);
+				}
+			}
+		}
+	}
+
+	/* get vout level */
+	psy_do_property(battery->pdata->wireless_charger_name, get,
+			POWER_SUPPLY_EXT_PROP_WIRELESS_RX_VOUT, value);
+
+	if (value.intval == WIRELESS_VOUT_5_5V_STEP)
+		pre_vout = WIRELESS_VOUT_5_5V_STEP;
+
+	if ((evt & (SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_ISDB)) ||
+			battery->sleep_mode || chg_limit || check_flicker_wa)
+		vout = WIRELESS_VOUT_5_5V_STEP;
+
+	if (vout != pre_vout) {
+		if (evt & SEC_BAT_CURRENT_EVENT_WPC_VOUT_LOCK) {
+			vout = pre_vout;
+			pr_info("%s: block to set wpc vout level(%d) because otg on\n",
+					__func__, vout);
+		} else {
+			value.intval = vout;
+			psy_do_property(battery->pdata->wireless_charger_name, set,
+					POWER_SUPPLY_EXT_PROP_INPUT_VOLTAGE_REGULATION, value);
+			pr_info("%s: change vout level(%d)", __func__, vout);
+			sec_vote(battery->input_vote, VOTER_AICL, false, 0);
+		}
+	} else if ((vout == WIRELESS_VOUT_10V ||
+				vout == battery->wpc_max_vout_level)) {
+		/* reset aicl current to recover current for unexpected aicl during */
+		/* before vout boosting completion */
+		sec_vote(battery->input_vote, VOTER_AICL, false, 0);
+	}
+	mutex_unlock(&battery->voutlock);
+	return vout;
+}
+EXPORT_SYMBOL_KUNIT(sec_bat_check_wpc_vout);
+
 __visible_for_testing int sec_bat_check_wpc_step_limit(struct sec_battery_info *battery, unsigned int step_sz,
 		unsigned int *step_limit_temp, unsigned int rx_power, int temp)
 {
@@ -434,6 +507,7 @@ void sec_bat_check_wpc_temp_v2(struct sec_battery_info *battery)
 	int temp_reset_condition = battery->pdata->wpc_temp_v2_cond;
 	int chg_limit = battery->chg_limit;
 	bool using_lrp = false;
+	union power_supply_propval value = {0, };
 
 	/* exception handling */
 	if (!is_hv_wireless_type(ct) ||
