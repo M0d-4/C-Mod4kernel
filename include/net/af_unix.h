@@ -6,6 +6,7 @@
 #include <linux/un.h>
 #include <linux/mutex.h>
 #include <linux/refcount.h>
+#include <linux/atomic.h>
 #include <net/sock.h>
 
 void unix_inflight(struct user_struct *user, struct file *fp);
@@ -58,7 +59,7 @@ struct unix_sock {
 	struct mutex		iolock, bindlock;
 	struct sock		*peer;
 	struct list_head	link;
-	unsigned long		inflight;
+	atomic_long_t		inflight;
 	spinlock_t		lock;
 	unsigned long		gc_flags;
 #define UNIX_GC_CANDIDATE	0
