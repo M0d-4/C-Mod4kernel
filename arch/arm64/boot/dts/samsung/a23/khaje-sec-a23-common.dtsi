@@ -14,6 +14,7 @@
 #include "khaje-sec-a23-sensor-common.dtsi"
 #include "khaje-sec-a23-grip-common.dtsi"
 #include "khaje-sec-a23-usb-common.dtsi"
+#include <dt-bindings/gpio/gpio.h>
 
 &reserved_memory {
 
