@@ -42,6 +42,7 @@
 
 #include <asm/cmpxchg.h>
 #include <asm/fixmap.h>
+#include <asm/cpufeature.h>
 #include <linux/mmdebug.h>
 #include <linux/mm_types.h>
 #include <linux/sched.h>
@@ -790,6 +791,22 @@ extern pgd_t tramp_pg_dir[PTRS_PER_PGD];
 #define MAX_SWAPFILES_CHECK() BUILD_BUG_ON(MAX_SWAPFILES_SHIFT > __SWP_TYPE_BITS)
 
 extern int kern_addr_valid(unsigned long addr);
+
+/*
+ * On CPUs that support hardware update of the Access Flag, PTEs can have
+ * their access bit set by hardware, so pte_young() checks are reliable
+ * without needing a page fault. MGLRU uses this to decide whether page
+ * table walking can be used to check for recently accessed pages.
+ */
+static inline bool arch_has_hw_pte_young(void)
+{
+#ifdef CONFIG_ARM64_HW_AFDBM
+	return cpus_have_const_cap(ARM64_HW_DBM);
+#else
+	return false;
+#endif
+}
+#define arch_has_hw_pte_young arch_has_hw_pte_young
 
 #include <asm-generic/pgtable.h>
 
